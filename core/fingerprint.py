@@ -1,6 +1,8 @@
 import requests
+import json
 
 def detect_waf(url):
+    # We keep headers as a fallback, but rely on behavior now.
     waf_signatures = {
         "cloudflare": ["cloudflare", "cf-ray"],
         "akamai": ["akamai", "akamaighost"],
@@ -17,8 +19,18 @@ def detect_waf(url):
     try:
         baseline = requests.get(url, headers=headers, timeout=5)
         attack = requests.get(target_url, headers=headers, timeout=5)
-        detected_waf = None
+        
+        detected_waf = "Unknown / Generic WAF"
+        blocked = False
 
+        # 1. Behavioral Detection (Status Codes)
+        if attack.status_code in [403, 406, 429]:
+            blocked = True
+        elif attack.status_code == 200:
+            # If the attack succeeded, there might be no WAF, or it's a very bad one.
+            blocked = False
+
+        # 2. Header Detection (Refine the WAF name)
         for waf_name, signatures in waf_signatures.items():
             for sig in signatures:
                 for header_key, header_val in baseline.headers.items():
@@ -26,14 +38,20 @@ def detect_waf(url):
                         detected_waf = waf_name
                         break
 
-        blocked = False
-        if attack.status_code in [403, 406, 429] and baseline.status_code == 200:
+        # 3. Body Detection (Look for specific block page strings)
+        attack_body = attack.text.lower()
+        if "cloudflare" in attack_body and "attention required" in attack_body:
+            detected_waf = "cloudflare"
             blocked = True
-            if not detected_waf:
-                detected_waf = "Unknown / Generic WAF"
+        elif "access denied" in attack_body and "incapsula" in attack_body:
+            detected_waf = "imperva"
+            blocked = True
+        elif "request blocked" in attack_body and "akamai" in attack_body:
+            detected_waf = "akamai"
+            blocked = True
 
         return {
-            "waf_detected": detected_waf,
+            "waf_detected": detected_waf if blocked or detected_waf != "Unknown / Generic WAF" else None,
             "blocked": blocked,
             "baseline_status": baseline.status_code,
             "attack_status": attack.status_code,
@@ -42,32 +60,33 @@ def detect_waf(url):
     except requests.exceptions.RequestException as e:
         return {"error": str(e)}
 
-def attempt_bypass(url, baseline_headers):
-    bypass_headers = [
-        {"X-Forwarded-For": "127.0.0.1"},
-        {"X-Originating-IP": "127.0.0.1"},
-        {"X-Remote-IP": "127.0.0.1"},
-        {"X-Client-IP": "127.0.0.1"},
-        {"X-Host": "127.0.0.1"},
-        {"X-Forwarded-Host": "127.0.0.1"}
-    ]
+def find_origin_ip(domain):
+    domain = domain.replace("www.", "")
+    print(f"[*] Searching for subdomains via HackerTarget for root domain: {domain}...")
     
-    payload = "<script>alert(1)</script>' OR 1=1 --"
-    target_url = f"{url}?test={payload}"
-    
-    successful_bypasses = []
-    
-    for header in bypass_headers:
-        # Merge default headers with the bypass header
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        headers.update(header)
+    try:
+        # HackerTarget free API for host search
+        url = f"https://api.hackertarget.com/hostsearch/?q={domain}"
+        response = requests.get(url, timeout=10)
         
-        try:
-            response = requests.get(target_url, headers=headers, timeout=5)
-            # If the status is 200, the bypass worked
-            if response.status_code == 200:
-                successful_bypasses.append(list(header.keys())[0])
-        except requests.exceptions.RequestException:
-            pass
+        if response.status_code == 200:
+            data = response.text
+            if "error" in data.lower() or "no records" in data.lower():
+                print(f"[-] HackerTarget returned no records.")
+                return []
+                
+            subdomains = set()
+            for line in data.split("\n"):
+                if line:
+                    sub = line.split(",")[0].strip().lower()
+                    if sub and "*" not in sub:
+                        subdomains.add(sub)
             
-    return successful_bypasses
+            print(f"[+] Found {len(subdomains)} unique subdomains.")
+            return list(subdomains)[:10] # Return the first 10
+        else:
+            print(f"[-] HackerTarget returned status code {response.status_code}")
+    except Exception as e:
+        print(f"[-] Error finding origin IPs: {e}")
+        
+    return []
