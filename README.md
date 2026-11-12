@@ -1,10 +1,10 @@
  <div align="center">
 
-# ⚔️ HOLLOW
+# ⚔️ HOLLOW v2
 
 ### WAF Fingerprinting & Bypass Profiler
 
-**Red Team Reconnaissance · WAF Detection · Evasion Intelligence**
+**Red Team Reconnaissance · Behavioral Fingerprinting · Evasion Intelligence**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Red Teaming](https://img.shields.io/badge/Red-Teaming-DC2626?style=for-the-badge)](https://github.com/CalculusGuy/Hollow)
@@ -18,23 +18,24 @@
 
 ## 🎯 What is HOLLOW?
 
-**HOLLOW** is a lightweight, Python-based Red Team reconnaissance tool designed to identify Web Application Firewalls (WAFs) protecting web applications and evaluate their response to controlled attack simulations.
+**HOLLOW** is a lightweight, Python-based Red Team reconnaissance tool designed to identify Web Application Firewalls (WAFs) protecting web applications and evaluate their responses to controlled attack simulations.
 
 Instead of blindly firing exploits, HOLLOW maps the defense first.
 
-It sends baseline requests followed by controlled malicious test payloads to identify potential WAF presence, analyze blocking behavior, and generate tailored evasion intelligence based on the detected technology.
+It sends baseline requests followed by controlled test payloads to analyze blocking behavior, fingerprint WAFs through HTTP headers and response bodies, and generate tailored evasion intelligence.
 
-The objective is simple: **Understand the defense before testing the attack surface.**
+**The objective is simple: Understand the defense before testing the attack surface.**
 
 ---
 
 ## 🚀 Features
 
-- **WAF Fingerprinting:** Identifies major WAF technologies, including Cloudflare, AWS WAF, Akamai, Sucuri, F5, and Imperva using HTTP headers and response signatures.
-- **Block Detection:** Uses controlled XSS and SQLi test payloads to analyze HTTP responses and identify potential filtering behavior.
-- **Evasion Testing (`--evade`):** Tests alternative HTTP request headers, including `X-Forwarded-For` and `X-Originating-IP`, to evaluate header-based trust configurations.
-- **Bypass Intelligence:** Generates WAF-specific testing recommendations based on fingerprinting results.
-- **Colorized CLI:** Provides clean, readable terminal output for real-time reconnaissance.
+- **Behavioral WAF Fingerprinting:** Identifies major WAFs (Cloudflare, AWS WAF, Akamai, Sucuri, F5, Imperva) by analyzing HTTP headers and actual block pages.
+- **Block Detection:** Sends controlled XSS and SQLi payloads to analyze HTTP responses (403/406) and identify filtering behavior.
+- **Payload Mutator (`--mutate`):** Generates and tests payload variations when the original payload is blocked, including URL encoding, hexadecimal encoding, case switching, and inline comments.
+- **Origin IP Hunter:** When Cloudflare is detected, queries the HackerTarget API for subdomain intelligence to help identify potentially exposed origin infrastructure.
+- **Evasion Testing (`--evade`):** Tests alternative HTTP request headers (e.g., `X-Forwarded-For`) to evaluate header-based trust configurations.
+- **Colorized CLI:** Clean, readable terminal output for real-time reconnaissance.
 
 ---
 
@@ -48,22 +49,22 @@ HOLLOW/
 │
 └── core/
     ├── __init__.py
-    ├── fingerprint.py      # WAF detection and response analysis
-    └── bypass.py           # Evasion testing and strategy recommendations
+    ├── fingerprint.py      # WAF detection, behavioral analysis & API recon
+    └── bypass.py            # Evasion testing, mutations & strategy recommendations
 ```
 
 ---
 
 ## ⚙️ Installation
 
-**1. Clone the repository**
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/CalculusGuy/Hollow.git
 cd Hollow
 ```
 
-**2. Install dependencies**
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -79,10 +80,22 @@ pip install -r requirements.txt
 python main.py -t https://example.com
 ```
 
-### 2. WAF Fingerprinting + Evasion Testing
+### 2. WAF Fingerprinting + Payload Mutations
+
+```bash
+python main.py -t https://example.com --mutate
+```
+
+### 3. Evasion Testing
 
 ```bash
 python main.py -t https://example.com --evade
+```
+
+### 4. Combined Testing
+
+```bash
+python main.py -t https://example.com --mutate --evade
 ```
 
 ---
@@ -90,7 +103,7 @@ python main.py -t https://example.com --evade
 ## 📊 Example Output
 
 ```text
-[*] Scanning target: https://example.com
+[*] Scanning target: https://www.digitalocean.com
 
 [*] Probing for WAF signatures...
 
@@ -98,33 +111,45 @@ python main.py -t https://example.com --evade
 
 [!] Attack payload was BLOCKED (Status: 403)
 
-[*] --evade flag detected.
-[*] Attempting header-based evasion tests...
+[*] --mutate flag detected. Generating payload mutations...
 
-[-] No tested header variations bypassed the filtering.
+    [-] URL Encoded failed. Status: 403
+    [-] Hex Encoded failed. Status: 403
+    [-] Case Switched failed. Status: 403
+    [-] Inline Comments failed. Status: 403
 
-[*] Suggested Testing Strategies:
+[*] Cloudflare detected. Attempting to find Origin IPs...
 
-    -> Investigate origin exposure and DNS history.
-    -> Evaluate internal trust boundaries and SSRF exposure.
-    -> Test encoding and normalization inconsistencies.
-    -> Review WAF rules and application-level validation.
+[*] Searching for subdomains via HackerTarget API...
+
+[+] Found 50 unique subdomains.
+
+    [+] Potential bypass subdomains found:
+        -> api.digitalocean.com
+        -> clienteng-nyc3.digitalocean.com
+        -> accounts.mcp.digitalocean.com
+        ...
+
+[*] Suggested Bypass Strategies:
+
+    -> Cloudflare detected: Try finding the origin IP via DNS history.
+    -> Payload triggered a block. Hollow attempted automated mutations.
 ```
 
 ---
 
-## 🧠 Supported WAFs
+## 🧠 Supported WAFs & Intelligence
 
 | WAF | Detection Indicators | Testing Intelligence |
 |:---|:---|:---|
-| **Cloudflare** | `cf-ray`, `cloudflare` headers | Origin exposure, encoding analysis |
-| **AWS WAF** | AWS-related headers and response signatures | Request normalization analysis |
+| **Cloudflare** | `cf-ray`, `cloudflare` headers, "Attention Required" block page | Origin infrastructure discovery, encoding analysis |
+| **AWS WAF** | AWS-related headers and response signatures | Request normalization analysis, chunked encoding |
 | **F5 BIG-IP** | `big-ip`, `f5` headers | Encoding and method-handling analysis |
-| **Imperva** | `incapsula`, `x-iinfo` headers | SQLi filtering and normalization |
-| **Akamai** | `akamai`, `akamaighost` headers | Obfuscation and case normalization |
+| **Imperva** | `incapsula`, `x-iinfo` headers, "Access Denied" block page | SQLi filtering and inline comment normalization |
+| **Akamai** | `akamai`, `akamaighost` headers, "Request Blocked" page | Obfuscation and case normalization |
 | **Sucuri** | `x-sucuri-id`, `sucuri` headers | Header handling and filtering analysis |
 
-*Note: WAF identification is heuristic-based. Header signatures and response behavior are indicators, not definitive proof of a particular WAF.*
+> **Note:** WAF identification is heuristic-based. Header signatures, block pages, and response behavior are indicators, not definitive proof of a particular WAF.
 
 ---
 
@@ -148,7 +173,7 @@ The author assumes no responsibility for misuse.
 
 **Nilanjan Chowdhury**
 
-Offensive Security Researcher · AI/LLM Red Teaming
+*Offensive Security Researcher · AI/LLM Red Teaming*
 
 - **GitHub:** [@CalculusGuy](https://github.com/CalculusGuy)
 - **LinkedIn:** [Nilanjan Chowdhury](https://linkedin.com/in/nilanjan-chowdhury-a36787359/)
@@ -164,7 +189,7 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 <div align="center">
 
-### ⚔️ HOLLOW
+### ⚔️ HOLLOW v2
 
 **Map the defense. Bypass the wall.**
 
